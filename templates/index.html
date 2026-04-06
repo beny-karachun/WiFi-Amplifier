@@ -52,8 +52,9 @@
                 </div>
 
                 <div class="form-group text-input">
-                    <label>Target Hotspot SSID</label>
-                    <input type="text" id="ssid-input" placeholder="e.g., HomeNetwork_EXT">
+                    <label>Target Hotspot SSID <span id="scan-status" style="font-size: 0.7em; color: var(--accent); margin-left: 8px;"></span></label>
+                    <input type="text" id="ssid-input" list="ssid-list" placeholder="e.g., HomeNetwork_EXT">
+                    <datalist id="ssid-list"></datalist>
                 </div>
 
                 <div class="form-group text-input">
@@ -94,6 +95,11 @@
 
                 if(data.interfaces.ethernet.length === 0) ethSelect.innerHTML = `<option value="">No Ethernet found</option>`;
                 if(data.interfaces.wifi.length === 0) wifiSelect.innerHTML = `<option value="">No WiFi found</option>`;
+
+                if(data.interfaces.wifi.length > 0 && !isActive) {
+                    fetchSSIDs(data.interfaces.wifi[0]);
+                }
+                wifiSelect.addEventListener('change', (e) => fetchSSIDs(e.target.value));
 
                 updateState(data.is_active);
             } catch(e) {
@@ -141,6 +147,22 @@
             } else {
                 btn.classList.remove('loading');
                 btn.disabled = false;
+            }
+        }
+
+        async function fetchSSIDs(wifiDev) {
+            if(!wifiDev) return;
+            const scanStatus = document.getElementById('scan-status');
+            scanStatus.textContent = "(Scanning...)";
+            try {
+                const res = await fetch(`/api/scan_wifi?wifi=${wifiDev}`);
+                const data = await res.json();
+                const datalist = document.getElementById('ssid-list');
+                datalist.innerHTML = data.ssids.map(ssid => `<option value="${ssid}">`).join('');
+                scanStatus.textContent = "";
+            } catch(e) {
+                console.error("Failed to scan SSIDs", e);
+                scanStatus.textContent = "";
             }
         }
 
