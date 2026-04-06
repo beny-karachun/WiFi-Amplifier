@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Amplifier</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-orbs">
+        <div class="orb orb1"></div>
+        <div class="orb orb2"></div>
+    </div>
+
+    <div class="glass-container">
+        <header>
+            <div class="logo-area">
+                <div class="signal-icon">
+                    <div class="bar bar1"></div>
+                    <div class="bar bar2"></div>
+                    <div class="bar bar3"></div>
+                </div>
+                <h1>WiFi <span>Amplifier</span></h1>
+            </div>
+            <p class="subtitle">Premium Mesh & True Bridge Setup</p>
+        </header>
+
+        <main id="app-body">
+            <div id="loader" class="screen -loading">
+                <div class="spinner"></div>
+                <p>Loading device interfaces...</p>
+            </div>
+
+            <div id="dashboard" class="screen hidden">
+                <div class="status-panel">
+                    <div class="status-indicator">
+                        <div class="dot" id="status-dot"></div>
+                        <span id="status-text">Disconnected</span>
+                    </div>
+                </div>
+
+                <div class="form-group row">
+                    <div class="input-col">
+                        <label>Ethernet Output</label>
+                        <select id="eth-select"></select>
+                    </div>
+                    <div class="input-col">
+                        <label>WiFi Transmitter</label>
+                        <select id="wifi-select"></select>
+                    </div>
+                </div>
+
+                <div class="form-group text-input">
+                    <label>Target Hotspot SSID</label>
+                    <input type="text" id="ssid-input" placeholder="e.g., HomeNetwork_EXT">
+                </div>
+
+                <div class="form-group text-input">
+                    <label>Hotspot Password</label>
+                    <input type="password" id="password-input" placeholder="Min. 8 characters">
+                </div>
+
+                <div class="action-area">
+                    <p class="error-msg" id="error-box"></p>
+                    <button id="main-btn" class="btn primary" onclick="toggleBridge()">
+                        <span class="btn-text">Amplify Network</span>
+                        <div class="btn-spinner"></div>
+                    </button>
+                    <!-- Small instruction label -->
+                    <p class="hint-text">Will create a true Layer 2 bridge from WiFi to Ethernet.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let isActive = false;
+        let isProcessing = false;
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                document.getElementById('loader').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+
+                const ethSelect = document.getElementById('eth-select');
+                const wifiSelect = document.getElementById('wifi-select');
+                
+                ethSelect.innerHTML = data.interfaces.ethernet.map(i => `<option value="${i}">${i}</option>`).join('');
+                wifiSelect.innerHTML = data.interfaces.wifi.map(i => `<option value="${i}">${i}</option>`).join('');
+
+                if(data.interfaces.ethernet.length === 0) ethSelect.innerHTML = `<option value="">No Ethernet found</option>`;
+                if(data.interfaces.wifi.length === 0) wifiSelect.innerHTML = `<option value="">No WiFi found</option>`;
+
+                updateState(data.is_active);
+            } catch(e) {
+                console.error(e);
+                showError("Failed to fetch device status.");
+            }
+        }
+
+        function updateState(active) {
+            isActive = active;
+            const dot = document.getElementById('status-dot');
+            const text = document.getElementById('status-text');
+            const btnText = document.querySelector('.btn-text');
+            const btn = document.getElementById('main-btn');
+
+            if(isActive) {
+                dot.classList.add('active');
+                text.textContent = "Amplifier Active (Bridged)";
+                text.style.color = "#4ade80";
+                btnText.textContent = "Stop Amplification";
+                btn.classList.add('danger');
+            } else {
+                dot.classList.remove('active');
+                document.querySelectorAll('.signal-icon .bar').forEach(b => b.classList.remove('animating'));
+                text.textContent = "Disconnected";
+                text.style.color = "#94a3b8";
+                btnText.textContent = "Amplify Network";
+                btn.classList.remove('danger');
+            }
+        }
+
+        function showError(msg) {
+            const errorBox = document.getElementById('error-box');
+            errorBox.textContent = msg;
+            errorBox.classList.add('show');
+            setTimeout(() => errorBox.classList.remove('show'), 6000);
+        }
+
+        function setProcessing(processing) {
+            isProcessing = processing;
+            const btn = document.getElementById('main-btn');
+            if(processing) {
+                btn.classList.add('loading');
+                btn.disabled = true;
+            } else {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        }
+
+        async function toggleBridge() {
+            if(isProcessing) return;
+            
+            if(isActive) {
+                // Stop bridge
+                setProcessing(true);
+                try {
+                    const res = await fetch('/api/stop', { method: 'POST' });
+                    const data = await res.json();
+                    if(data.success) {
+                        updateState(false);
+                        document.querySelectorAll('.signal-icon .bar').forEach(b => b.classList.remove('animating'));
+                    } else {
+                        showError(data.error);
+                    }
+                } catch(e) {
+                    showError("Connection error.");
+                }
+                setProcessing(false);
+            } else {
+                // Start bridge
+                const eth = document.getElementById('eth-select').value;
+                const wifi = document.getElementById('wifi-select').value;
+                const ssid = document.getElementById('ssid-input').value;
+                const password = document.getElementById('password-input').value;
+
+                if(!eth || !wifi) return showError("Interfaces missing.");
+                if(!ssid || password.length < 8) return showError("SSID required and Password must be >= 8 chars.");
+
+                setProcessing(true);
+                try {
+                    const res = await fetch('/api/start', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ ethernet: eth, wifi: wifi, ssid: ssid, password: password })
+                    });
+                    const data = await res.json();
+                    if(data.success) {
+                        updateState(true);
+                        document.querySelectorAll('.signal-icon .bar').forEach(b => b.classList.add('animating'));
+                    } else {
+                        showError(data.error || "Failed to start.");
+                    }
+                } catch(e) {
+                    showError("Connection error.");
+                }
+                setProcessing(false);
+            }
+        }
+
+        // Initialize
+        document.addEventListener("DOMContentLoaded", () => {
+            fetchStatus();
+        });
+    </script>
+</body>
+</html>
