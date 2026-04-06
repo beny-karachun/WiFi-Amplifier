@@ -3,6 +3,15 @@
 # Ensure we're in the right directory
 cd "$(dirname "$0")"
 
+# Require Administrator Privileges (Sudo) for Hardware Network Access
+if [ "$EUID" -ne 0 ]; then
+    echo "============================================="
+    echo "This script requires Administrator Access to"
+    echo "seize control of the Wi-Fi hardware."
+    echo "============================================="
+    exec sudo "$0" "$@"
+fi
+
 # Create virtualenv if not exists
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
