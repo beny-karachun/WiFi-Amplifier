@@ -3,6 +3,7 @@ from flask import Flask, render_template, request, jsonify
 import subprocess
 import re
 import os
+import shlex
 
 app = Flask(__name__)
 
@@ -60,7 +61,7 @@ def api_status():
 @app.route("/api/scan_wifi", methods=["GET"])
 def api_scan_wifi():
     wifi_dev = request.args.get("wifi")
-    cmd = f"nmcli -t -f SSID device wifi list ifname {wifi_dev}" if wifi_dev else "nmcli -t -f SSID device wifi list"
+    cmd = f"nmcli -t -f SSID device wifi list ifname {shlex.quote(wifi_dev)}" if wifi_dev else "nmcli -t -f SSID device wifi list"
     success, out = run_cmd(cmd)
     ssids = set()
     if success and out:
@@ -84,8 +85,13 @@ def api_start():
     if not all([eth_dev, wifi_dev, ssid, password]):
         return jsonify({"success": False, "error": "Missing parameters"}), 400
         
-    if len(password) < 8:
-        return jsonify({"success": False, "error": "Password must be at least 8 characters"}), 400
+    if len(password) < 8 or len(password) > 63:
+        return jsonify({"success": False, "error": "Password must be manually set between 8 and 63 characters"}), 400
+
+    eth_dev_q = shlex.quote(eth_dev)
+    wifi_dev_q = shlex.quote(wifi_dev)
+    ssid_q = shlex.quote(ssid)
+    password_q = shlex.quote(password)
 
     clean_bridge()
     
@@ -96,7 +102,7 @@ def api_start():
         return jsonify({"success": False, "error": f"Failed to create bridge: {err1}"}), 500
 
     # 2. Add Ethernet slave
-    cmd2 = f'nmcli connection add type ethernet slave-type bridge con-name br-port-eth ifname {eth_dev} master br0'
+    cmd2 = f'nmcli connection add type ethernet slave-type bridge con-name br-port-eth ifname {eth_dev_q} master br0'
     s2, err2 = run_cmd(cmd2)
     if not s2:
         clean_bridge()
@@ -104,11 +110,12 @@ def api_start():
 
     # 3. Add WiFi AP slave
     # Note: wifi-sec.key-mgmt wpa-psk uses WPA2 by default
-    cmd3 = f'nmcli connection add type wifi slave-type bridge con-name br-port-wifi ifname {wifi_dev} master br0 wifi.mode ap wifi.ssid "{ssid}" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "{password}"'
+    # Note: 802-11-wireless.powersave 2 forcefully disables speed-throttling power management
+    cmd3 = f'nmcli connection add type wifi slave-type bridge con-name br-port-wifi ifname {wifi_dev_q} master br0 wifi.mode ap wifi.ssid {ssid_q} wifi-sec.key-mgmt wpa-psk wifi-sec.psk {password_q} 802-11-wireless.powersave 2'
     
     if band == "a":
-        # Force 5GHz on a common non-DFS channel (36)
-        cmd3 += " 802-11-wireless.band a 802-11-wireless.channel 36"
+        # Force 5GHz on channel 149 (Bypasses the "No IR" lock common on lower channels)
+        cmd3 += " 802-11-wireless.band a 802-11-wireless.channel 149"
     elif band == "bg":
         # Force 2.4GHz on channel 6
         cmd3 += " 802-11-wireless.band bg 802-11-wireless.channel 6"
@@ -129,13 +136,17 @@ def api_start():
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
     clean_bridge()
-    # It might be necessary to bring the old ethernet connection back up
-    # We will try to up any basic ethernet connection if available
-    eths = get_interfaces()["ethernet"]
+    # It might be necessary to bring the old connections back up
+    interfaces = get_interfaces()
+    
+    eths = interfaces["ethernet"]
     if eths:
-      # find existing connection for eths[0] and bring it up
-      run_cmd(f"nmcli device connect {eths[0]}")
+      run_cmd(f"nmcli device connect {shlex.quote(eths[0])}")
       
+    wifis = interfaces["wifi"]
+    if wifis:
+      run_cmd(f"nmcli device connect {shlex.quote(wifis[0])}")
+
     return jsonify({"success": True})
 
 if __name__ == "__main__":

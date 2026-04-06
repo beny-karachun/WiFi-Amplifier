@@ -67,7 +67,10 @@
 
                 <div class="form-group text-input">
                     <label>Hotspot Password</label>
-                    <input type="password" id="password-input" placeholder="Min. 8 characters">
+                    <div style="position: relative;">
+                        <input type="password" id="password-input" placeholder="8-63 characters" style="padding-right: 40px;">
+                        <button type="button" id="toggle-pw-btn" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-primary); opacity: 0.6; transition: opacity 0.2s;">👁️</button>
+                    </div>
                 </div>
 
                 <div class="action-area">
@@ -86,6 +89,13 @@
     <script>
         let isActive = false;
         let isProcessing = false;
+        let savedNetworks = JSON.parse(localStorage.getItem('savedNetworks')) || {};
+
+        function updateDatalist(scannedSSIDs) {
+            const datalist = document.getElementById('ssid-list');
+            const uniqueSSIDs = new Set([...scannedSSIDs, ...Object.keys(savedNetworks)]);
+            datalist.innerHTML = Array.from(uniqueSSIDs).map(ssid => `<option value="${ssid}">`).join('');
+        }
 
         async function fetchStatus() {
             try {
@@ -165,8 +175,7 @@
             try {
                 const res = await fetch(`/api/scan_wifi?wifi=${wifiDev}`);
                 const data = await res.json();
-                const datalist = document.getElementById('ssid-list');
-                datalist.innerHTML = data.ssids.map(ssid => `<option value="${ssid}">`).join('');
+                updateDatalist(data.ssids);
                 scanStatus.textContent = "";
             } catch(e) {
                 console.error("Failed to scan SSIDs", e);
@@ -198,11 +207,11 @@
                 const eth = document.getElementById('eth-select').value;
                 const wifi = document.getElementById('wifi-select').value;
                 const band = document.getElementById('band-select').value;
-                const ssid = document.getElementById('ssid-input').value;
+                const ssid = document.getElementById('ssid-input').value.trim();
                 const password = document.getElementById('password-input').value;
 
                 if(!eth || !wifi) return showError("Interfaces missing.");
-                if(!ssid || password.length < 8) return showError("SSID required and Password must be >= 8 chars.");
+                if(!ssid || password.length < 8 || password.length > 63) return showError("SSID required and Password must be 8-63 chars.");
 
                 setProcessing(true);
                 try {
@@ -213,6 +222,10 @@
                     });
                     const data = await res.json();
                     if(data.success) {
+                        savedNetworks[ssid] = password;
+                        localStorage.setItem('savedNetworks', JSON.stringify(savedNetworks));
+                        updateDatalist([]); // refresh locally
+                        
                         updateState(true);
                         document.querySelectorAll('.signal-icon .bar').forEach(b => b.classList.add('animating'));
                     } else {
@@ -227,7 +240,28 @@
 
         // Initialize
         document.addEventListener("DOMContentLoaded", () => {
+            updateDatalist([]);
+            
+            document.getElementById('ssid-input').addEventListener('input', (e) => {
+                const ssid = e.target.value.trim();
+                if(savedNetworks[ssid]) {
+                    document.getElementById('password-input').value = savedNetworks[ssid];
+                }
+            });
+
+            document.getElementById('toggle-pw-btn').addEventListener('click', (e) => {
+                const pwInput = document.getElementById('password-input');
+                if (pwInput.type === 'password') {
+                    pwInput.type = 'text';
+                    e.target.textContent = '🙈';
+                } else {
+                    pwInput.type = 'password';
+                    e.target.textContent = '👁️';
+                }
+            });
+
             fetchStatus();
+            setInterval(fetchStatus, 5000);
         });
     </script>
 </body>
