@@ -79,6 +79,7 @@ def api_start():
     wifi_dev = data.get("wifi")
     ssid = data.get("ssid")
     password = data.get("password")
+    band = data.get("band", "bg") # 'bg' is 2.4GHz, 'a' is 5GHz
 
     if not all([eth_dev, wifi_dev, ssid, password]):
         return jsonify({"success": False, "error": "Missing parameters"}), 400
@@ -104,10 +105,18 @@ def api_start():
     # 3. Add WiFi AP slave
     # Note: wifi-sec.key-mgmt wpa-psk uses WPA2 by default
     cmd3 = f'nmcli connection add type wifi slave-type bridge con-name br-port-wifi ifname {wifi_dev} master br0 wifi.mode ap wifi.ssid "{ssid}" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "{password}"'
+    
+    if band == "a":
+        # Force 5GHz on a common non-DFS channel (36)
+        cmd3 += " 802-11-wireless.band a 802-11-wireless.channel 36"
+    elif band == "bg":
+        # Force 2.4GHz on channel 6
+        cmd3 += " 802-11-wireless.band bg 802-11-wireless.channel 6"
+
     s3, err3 = run_cmd(cmd3)
     if not s3:
         clean_bridge()
-        return jsonify({"success": False, "error": f"Failed to add wifi slave (AP mode might not be supported): {err3}"}), 500
+        return jsonify({"success": False, "error": f"Failed to add wifi slave. Your card may not support the selected band/AP mode: {err3}"}), 500
 
     # 4. Bring up the bridge
     s4, err4 = run_cmd('nmcli connection up br0')
